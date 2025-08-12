@@ -43,6 +43,55 @@ async function rdapLookup(domain: string): Promise<{ exists: boolean; statusRaw:
   }
 }
 
+async function checkDomainAvailability(domain: string): Promise<{ available: boolean; statusRaw: string }> {
+  // Try multiple sources for better accuracy
+  const sources = [
+    // Primary: RDAP
+    async () => {
+      const rdap = await rdapLookup(domain);
+      return { available: !rdap.exists, statusRaw: rdap.statusRaw };
+    },
+    // Fallback: DNS lookup
+    async () => {
+      try {
+        const dns = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=A`);
+        const data = await dns.json();
+        const hasRecords = data?.Answer && data.Answer.length > 0;
+        return { available: !hasRecords, statusRaw: hasRecords ? "dns_resolved" : "no_dns" };
+      } catch {
+        return { available: false, statusRaw: "dns_error" };
+      }
+    },
+    // Fallback: HTTP check
+    async () => {
+      try {
+        await fetch(`https://${domain}`, { 
+          method: 'HEAD',
+          signal: AbortSignal.timeout(5000)
+        });
+        return { available: false, statusRaw: "http_responds" };
+      } catch {
+        return { available: true, statusRaw: "http_fails" };
+      }
+    }
+  ];
+
+  // Try sources in order, return first definitive result
+  for (const source of sources) {
+    try {
+      const result = await source();
+      if (result.statusRaw !== "rdap_timeout" && result.statusRaw !== "dns_error") {
+        return result;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // If all sources fail, be conservative and assume taken
+  return { available: false, statusRaw: "check_failed" };
+}
+
 function toKeyword(domain: string): string {
   const lower = domain.toLowerCase();
   const withoutProto = lower.replace(/^https?:\/\//, "");
@@ -184,8 +233,8 @@ export async function getDomainStatus(name: string): Promise<DomainStatus> {
   if (isDemoMode()) {
     const demo = getDemo(name);
     if (demo) return demo.status;
-    const rdap = await rdapLookup(name);
-    return { domain: name, available: !rdap.exists, statusRaw: rdap.statusRaw, tld };
+    const availability = await checkDomainAvailability(name);
+    return { domain: name, available: availability.available, statusRaw: availability.statusRaw, tld };
   }
 
   const clientId = getEnv("DOMAINR_API_KEY");
@@ -219,11 +268,13 @@ export async function getAlternatives(name: string): Promise<Suggestion[]> {
     const list = Array.from(candidates)
       .filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d))
       .slice(0, 24);
-    const checks = await Promise.allSettled(list.map((d) => rdapLookup(d)));
-    type Fulfilled = PromiseFulfilledResult<{ exists: boolean; statusRaw: string }>;
+    
+    // Use improved availability checking for better accuracy
+    const checks = await Promise.allSettled(list.map((d) => checkDomainAvailability(d)));
+    type Fulfilled = PromiseFulfilledResult<{ available: boolean; statusRaw: string }>;
     const out: Suggestion[] = list.map((d, i) => {
       const r = checks[i];
-      const available = r.status === "fulfilled" ? !(r as Fulfilled).value.exists : false;
+      const available = r.status === "fulfilled" ? (r as Fulfilled).value.available : false;
       return { domain: d, available };
     });
     return out.filter((s) => s.available).slice(0, 12);
