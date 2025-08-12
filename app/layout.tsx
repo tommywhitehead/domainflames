@@ -16,8 +16,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DomainFlames 🔥",
+  title: "DomainFlames",
   description: "Search domain availability, pricing, WHOIS, and alternatives.",
+  icons: {
+    icon: '/icon.svg',
+  },
 };
 
 export default function RootLayout({
@@ -32,8 +35,8 @@ export default function RootLayout({
           <div className="w-full border-b">
             <div className="container mx-auto max-w-4xl px-4 py-4">
               <div className="flex items-center justify-between">
-                <Link href="/" className="font-semibold text-lg" aria-label="Home">
-                  DomainFlames 🔥
+                <Link href="/" className="font-semibold text-2xl" aria-label="Home">
+                  🔥
                 </Link>
                 <ThemeToggle />
               </div>
