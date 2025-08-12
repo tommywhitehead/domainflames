@@ -16,8 +16,6 @@ import SearchBar from "@/components/search-bar";
 
 type Params = { params: Promise<{ domain: string }> };
 
-// Internal API fetch helper removed; call server utilities directly
-
 export default async function ResultsPage({ params }: Params) {
   const { domain } = await params;
   const decoded = decodeURIComponent(domain);
@@ -26,26 +24,23 @@ export default async function ResultsPage({ params }: Params) {
   let status: DomainStatus = { domain: decoded, available: false, statusRaw: "unknown", tld };
   try {
     status = await getDomainStatus(decoded);
-  } catch (e) {
+  } catch {
     errors.push("Failed to check domain status.");
   }
 
   let alternatives: Suggestion[] = [];
   try {
     alternatives = await getAlternatives(decoded);
-  } catch (e) {
+  } catch {
     errors.push("Failed to load suggestions.");
   }
 
   let prices: RegistrarPrice[] = [];
   try {
     prices = await getRegistrarPrices(tld, decoded);
-  } catch (e) {
+  } catch {
     errors.push("Failed to load registrar prices.");
   }
-
-  const whois = null; // streamed below
-  const screenshotUrl = null; // streamed below
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8">
@@ -78,7 +73,6 @@ export default async function ResultsPage({ params }: Params) {
         <section className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Suspense fallback={<WhoisSkeleton />}>
-              {/* Client fetching panel to avoid server caching issues */}
               <WhoisPanel domain={decoded} />
             </Suspense>
             <Suspense fallback={<ScreenshotSkeleton />}>
@@ -129,26 +123,6 @@ function AvailableSection({ domain, prices }: { domain: string; prices: Registra
       </Card>
     </section>
   );
-}
-
-async function WhoisSection({ domain }: { domain: string }) {
-  try {
-    // Avoid caching failures and retry once
-    const doFetch = async () => {
-      const r = await fetch(`/api/get-whois?name=${encodeURIComponent(domain)}`, { cache: "no-store" });
-      if (!r.ok) throw new Error("whois_error");
-      return (await r.json()) as WhoisSummary;
-    };
-    let whois: WhoisSummary;
-    try {
-      whois = await doFetch();
-    } catch {
-      whois = await doFetch();
-    }
-    return <WhoisCard whois={whois || {}} />;
-  } catch {
-    return <WhoisCard whois={{}} />;
-  }
 }
 
 async function ScreenshotSection({ domain }: { domain: string }) {

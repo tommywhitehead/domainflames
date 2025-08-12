@@ -14,7 +14,7 @@ function nextFetchInit(): RequestInit & { next: { revalidate: number } } {
   return { next: { revalidate: FIVE_MINUTES } } as { next: { revalidate: number } };
 }
 
-async function fetchWithTimeout<T = unknown>(
+async function fetchWithTimeout(
   url: string,
   init: RequestInit & { next?: { revalidate?: number } } = {},
   timeoutMs: number = DEFAULT_TIMEOUT_MS
@@ -52,7 +52,6 @@ function toKeyword(domain: string): string {
   return parts.slice(0, -1).join("-").replace(/[^a-z0-9-]/g, "");
 }
 
-// Demo fixtures for a few domains
 const DEMO_FIXTURES = {
   "example.com": {
     status: { domain: "example.com", available: false, statusRaw: "active", tld: "com" } as DomainStatus,
@@ -115,20 +114,16 @@ function getDemo(domain: string) {
   return DEMO_FIXTURES[key as keyof typeof DEMO_FIXTURES];
 }
 
+type GoDaddyV2 = { domains?: Array<{ price?: number; purchasePrice?: number; salePrice?: number }>; price?: number; purchasePrice?: number; salePrice?: number } | Array<{ price?: number; purchasePrice?: number; salePrice?: number }>;
+
+type GoDaddyV1Avail = { price?: number };
+
+type GoDaddyV1Price = { amount?: number; price?: number };
+
 function computeBuyUrl(registrar: string, domain: string): string {
   const r = registrar.toLowerCase();
   const d = encodeURIComponent(domain);
   if (r.includes("godaddy")) return `https://www.godaddy.com/domainsearch/find?checkAvail=1&tmskey=&domainToCheck=${d}`;
-  if (r.includes("namecheap")) return `https://www.namecheap.com/domains/registration/results/?domain=${d}`;
-  if (r.includes("porkbun")) return `https://porkbun.com/checkout/search?domain=${d}`;
-  if (r.includes("cloudflare")) return `https://www.cloudflare.com/products/registrar/?_cf_rc=1#search=${d}`;
-  if (r.includes("dynadot")) return `https://www.dynadot.com/domain/search.html?domain=${d}`;
-  if (r.includes("hover")) return `https://www.hover.com/domains/results?domain=${d}`;
-  if (r.includes("name.com") || r === "name") return `https://www.name.com/domain/search/${d}`;
-  if (r.includes("gandi")) return `https://shop.gandi.net/en/domain/search?search=${d}`;
-  if (r.includes("squarespace") || r.includes("google domains") || r.includes("google")) return `https://domains.squarespace.com/domain/search?searchTerm=${d}`;
-  if (r.includes("register.com")) return `https://www.register.com/domain-registration/index.jsp?searchDomainName=${d}`;
-  if (r.includes("ionos")) return `https://www.ionos.com/domains/domain-name-search?ac=OM.US.USo71K356376T7073a&domain=${d}`;
   return `https://duckduckgo.com/?q=${d}+domain+registration`;
 }
 
@@ -136,139 +131,52 @@ async function getGoDaddyPrice(domain: string): Promise<RegistrarPrice | null> {
   const key = getEnv("GODADDY_API_KEY");
   const secret = getEnv("GODADDY_API_SECRET");
   if (!key || !secret) return null;
-  const headers = {
+  const headers: Record<string, string> = {
     Authorization: `sso-key ${key}:${secret}`,
     Accept: "application/json",
     "X-Market-Id": "en-US",
-  } as Record<string, string>;
-
-  const normalize = (amount: unknown): number => {
-    const n = Number(amount ?? 0);
-    if (!isFinite(n) || n <= 0) return 0;
-    if (n >= 100000) return n / 1_000_000; // micros → USD
-    if (n >= 100) return n / 100; // cents → USD
-    return n; // assume USD
   };
 
-  // Try v2 availability (often returns price)
+  const normalize = (amount: number | undefined): number => {
+    const n = typeof amount === "number" ? amount : 0;
+    if (!isFinite(n) || n <= 0) return 0;
+    if (n >= 100000) return n / 1_000_000;
+    if (n >= 100) return n / 100;
+    return n;
+  };
+
   try {
     const urlV2 = `https://api.godaddy.com/v2/domains/available?domain=${encodeURIComponent(domain)}&checkType=FAST&forTransfer=false`;
     const r = await fetchWithTimeout(urlV2, { ...nextFetchInit(), headers });
     if (r.ok) {
-      const data = await r.json();
-      const item: any = Array.isArray(data)
-        ? data[0]
-        : Array.isArray((data as any)?.domains)
-        ? (data as any).domains[0]
-        : data;
+      const data = (await r.json()) as GoDaddyV2;
+      const item = Array.isArray(data) ? data[0] : Array.isArray(data?.domains) ? data.domains[0] : data;
       const priceUsd = normalize(item?.price ?? item?.purchasePrice ?? item?.salePrice);
-      if (priceUsd > 0) {
-        return { registrar: "GoDaddy", priceUsd, buyUrl: computeBuyUrl("GoDaddy", domain) };
-      }
+      if (priceUsd > 0) return { registrar: "GoDaddy", priceUsd, buyUrl: computeBuyUrl("GoDaddy", domain) };
     }
   } catch {}
 
-  // Try v1 availability
   try {
     const urlV1Avail = `https://api.godaddy.com/v1/domains/available?domain=${encodeURIComponent(domain)}&checkType=FAST&forTransfer=false`;
     const r = await fetchWithTimeout(urlV1Avail, { ...nextFetchInit(), headers });
     if (r.ok) {
-      const data = await r.json();
-      const priceUsd = normalize((data as any)?.price);
-      if (priceUsd > 0) {
-        return { registrar: "GoDaddy", priceUsd, buyUrl: computeBuyUrl("GoDaddy", domain) };
-      }
+      const data = (await r.json()) as GoDaddyV1Avail;
+      const priceUsd = normalize(data?.price);
+      if (priceUsd > 0) return { registrar: "GoDaddy", priceUsd, buyUrl: computeBuyUrl("GoDaddy", domain) };
     }
   } catch {}
 
-  // Try v1 price endpoint
   try {
     const urlV1Price = `https://api.godaddy.com/v1/domains/price?domain=${encodeURIComponent(domain)}&currency=USD`;
     const r = await fetchWithTimeout(urlV1Price, { ...nextFetchInit(), headers });
     if (r.ok) {
-      const data = await r.json();
-      const priceUsd = normalize((data as any)?.amount ?? (data as any)?.price);
-      if (priceUsd > 0) {
-        return { registrar: "GoDaddy", priceUsd, buyUrl: computeBuyUrl("GoDaddy", domain) };
-      }
+      const data = (await r.json()) as GoDaddyV1Price;
+      const priceUsd = normalize(data?.amount ?? data?.price);
+      if (priceUsd > 0) return { registrar: "GoDaddy", priceUsd, buyUrl: computeBuyUrl("GoDaddy", domain) };
     }
   } catch {}
 
-  return {
-    registrar: "GoDaddy",
-    priceUsd: 0,
-    buyUrl: computeBuyUrl("GoDaddy", domain),
-  };
-}
-
-function getEstimatedPrices(tld: string, domain: string): RegistrarPrice[] {
-  const byTld: Record<string, Array<{ registrar: string; priceUsd: number }>> = {
-    com: [
-      { registrar: "Namecheap", priceUsd: 9.58 },
-      { registrar: "GoDaddy", priceUsd: 12.99 },
-      { registrar: "Porkbun", priceUsd: 9.73 },
-      { registrar: "Cloudflare Registrar", priceUsd: 9.15 },
-    ],
-    net: [
-      { registrar: "Namecheap", priceUsd: 11.98 },
-      { registrar: "GoDaddy", priceUsd: 14.99 },
-      { registrar: "Porkbun", priceUsd: 10.73 },
-      { registrar: "Cloudflare Registrar", priceUsd: 10.28 },
-    ],
-    org: [
-      { registrar: "Namecheap", priceUsd: 9.58 },
-      { registrar: "GoDaddy", priceUsd: 12.99 },
-      { registrar: "Porkbun", priceUsd: 8.73 },
-      { registrar: "Cloudflare Registrar", priceUsd: 9.18 },
-    ],
-    io: [
-      { registrar: "Namecheap", priceUsd: 32.98 },
-      { registrar: "GoDaddy", priceUsd: 49.99 },
-      { registrar: "Porkbun", priceUsd: 39.95 },
-      { registrar: "Cloudflare Registrar", priceUsd: 35.00 },
-    ],
-    ai: [
-      { registrar: "Namecheap", priceUsd: 69.98 },
-      { registrar: "GoDaddy", priceUsd: 69.99 },
-      { registrar: "Porkbun", priceUsd: 65.95 },
-      { registrar: "Cloudflare Registrar", priceUsd: 69.50 },
-    ],
-    app: [
-      { registrar: "Namecheap", priceUsd: 14.98 },
-      { registrar: "GoDaddy", priceUsd: 19.99 },
-      { registrar: "Porkbun", priceUsd: 12.73 },
-      { registrar: "Cloudflare Registrar", priceUsd: 14.50 },
-    ],
-    dev: [
-      { registrar: "Namecheap", priceUsd: 14.98 },
-      { registrar: "GoDaddy", priceUsd: 19.99 },
-      { registrar: "Porkbun", priceUsd: 12.73 },
-      { registrar: "Cloudflare Registrar", priceUsd: 14.50 },
-    ],
-    co: [
-      { registrar: "Namecheap", priceUsd: 27.98 },
-      { registrar: "GoDaddy", priceUsd: 34.99 },
-      { registrar: "Porkbun", priceUsd: 27.95 },
-      { registrar: "Cloudflare Registrar", priceUsd: 28.50 },
-    ],
-    xyz: [
-      { registrar: "Namecheap", priceUsd: 2.00 },
-      { registrar: "GoDaddy", priceUsd: 0.99 },
-      { registrar: "Porkbun", priceUsd: 1.00 },
-      { registrar: "Cloudflare Registrar", priceUsd: 2.50 },
-    ],
-  };
-  const entries = byTld[tld?.toLowerCase()] || [
-    { registrar: "Namecheap", priceUsd: 12.0 },
-    { registrar: "GoDaddy", priceUsd: 14.0 },
-    { registrar: "Porkbun", priceUsd: 11.0 },
-    { registrar: "Cloudflare Registrar", priceUsd: 12.0 },
-  ];
-  return entries.map((e) => ({
-    registrar: e.registrar,
-    priceUsd: e.priceUsd,
-    buyUrl: computeBuyUrl(e.registrar, domain),
-  }));
+  return { registrar: "GoDaddy", priceUsd: 0, buyUrl: computeBuyUrl("GoDaddy", domain) };
 }
 
 export async function getDomainStatus(name: string): Promise<DomainStatus> {
@@ -276,7 +184,6 @@ export async function getDomainStatus(name: string): Promise<DomainStatus> {
   if (isDemoMode()) {
     const demo = getDemo(name);
     if (demo) return demo.status;
-    // RDAP-only fallback so it works without signups
     const rdap = await rdapLookup(name);
     return { domain: name, available: !rdap.exists, statusRaw: rdap.statusRaw, tld };
   }
@@ -298,7 +205,6 @@ export async function getAlternatives(name: string): Promise<Suggestion[]> {
   if (isDemoMode()) {
     const demo = getDemo(name);
     if (demo) return [...demo.suggestions];
-    // Generate candidate suggestions locally and verify via RDAP
     const base = toKeyword(name);
     const tlds = ["com", "net", "org", "io", "ai", "app", "dev", "co", "xyz", "site"];
     const prefixes = ["", "get", "try", "join", "use", "go"];
@@ -306,7 +212,6 @@ export async function getAlternatives(name: string): Promise<Suggestion[]> {
     const candidates = new Set<string>();
     for (const t of tlds) {
       candidates.add(`${base}.${t}`);
-      // add a variant without dashes for breadth
       candidates.add(`${base.replace(/-/g, "")}.${t}`);
       for (const p of prefixes) candidates.add(`${p ? p : ""}${p ? "" : ""}${p ? p : ""}${base}.${t}`.replace(/^(get|try|join|use|go){2,}/, "$1"));
       for (const s of suffixes) candidates.add(`${base}${s ? "-" + s : ""}.${t}`);
@@ -338,12 +243,10 @@ export async function getAlternatives(name: string): Promise<Suggestion[]> {
   return results.filter((r) => !!r.domain).slice(0, 12);
 }
 
-export async function getRegistrarPrices(tld: string, domain?: string): Promise<RegistrarPrice[]> {
+export async function getRegistrarPrices(_tld: string, domain?: string): Promise<RegistrarPrice[]> {
   if (!domain) return [];
-  // Prefer GoDaddy only
   const gd = await getGoDaddyPrice(domain);
   if (gd) return [gd];
-  // If no API keys for GoDaddy, return link-only row without price
   return [
     {
       registrar: "GoDaddy",
@@ -366,8 +269,8 @@ export async function getWhois(name: string): Promise<WhoisSummary> {
         status: w.status ? [...w.status] : undefined,
       };
     }
-    return {};
   }
+
   const rdapCandidates: string[] = (() => {
     switch (extractTld(name)) {
       case "com":
@@ -411,101 +314,38 @@ export async function getWhois(name: string): Promise<WhoisSummary> {
     }
   })();
 
-  let lastError: Error | null = null;
   for (const url of rdapCandidates) {
     try {
       const res = await fetchWithTimeout(url, nextFetchInit());
       if (!res.ok) continue;
       type VCardRow = [string, ...unknown[]];
       const json = (await res.json()) as {
-    events?: Array<{ eventAction?: string; eventDate?: string }>;
-    entities?: Array<{
-      roles?: string[];
-      vcardArray?: [string, VCardRow[]];
-      entities?: Array<{ vcardArray?: [string, VCardRow[]] }>;
-    }>;
-    status?: string[];
+        events?: Array<{ eventAction?: string; eventDate?: string }>;
+        entities?: Array<{
+          roles?: string[];
+          vcardArray?: [string, VCardRow[]];
+          entities?: Array<{ vcardArray?: [string, VCardRow[]] }>;
+        }>;
+        status?: string[];
       };
-      // parse events
       const events = json?.events || [];
       const createdAt = events.find((e) => e?.eventAction === "registration")?.eventDate;
       const expiresAt = events.find((e) => e?.eventAction === "expiration")?.eventDate;
-      // parse entities
       const entities = json?.entities || [];
       const registrarEntity = entities.find((e) => (e?.roles || []).includes("registrar"));
-      const registrantEntity = entities.find((e) => (e?.roles || []).includes("registrant"));
       const registrarCard = registrarEntity?.vcardArray?.[1] || registrarEntity?.entities?.[0]?.vcardArray?.[1] || [];
       const fnRow = Array.isArray(registrarCard) ? (registrarCard as VCardRow[]).find((v) => Array.isArray(v) && v[0] === "fn") : undefined;
       const registrar = fnRow?.[3] as string | undefined;
-      const registrantCard = registrantEntity?.vcardArray?.[1] || [];
-      const adrRow = Array.isArray(registrantCard) ? (registrantCard as VCardRow[]).find((v) => Array.isArray(v) && v[0] === "adr") : undefined;
-      function getAdrValues(row: VCardRow | undefined): unknown[] | undefined {
-        if (!row) return undefined;
-        const v = row[3];
-        return Array.isArray(v) ? (v as unknown[]) : undefined;
-      }
-      const adrValues = getAdrValues(adrRow);
-      const country = Array.isArray(adrValues) ? (adrValues[6] as string | undefined) : undefined;
       const status: string[] = (json?.status || []).map((s) => String(s));
-      return {
-        registrar: registrar || undefined,
-        createdAt,
-        expiresAt,
-        registrantCountry: country,
-        status,
-      };
-    } catch (e) {
-      lastError = e as Error;
+      return { registrar, createdAt, expiresAt, status };
+    } catch {
       continue;
     }
   }
-   // If RDAP didn’t yield, try raw WHOIS over port 43
-   // TCP WHOIS disabled in this build (Edge-safe). Skipping port-43 fallback.
-   if (lastError) throw lastError;
-   return {};
- }
-
-function whoisHostForTld(tld: string): string | undefined {
-  switch (tld) {
-    case "com":
-    case "net":
-      return "whois.verisign-grs.com";
-    case "org":
-      return "whois.publicinterestregistry.net";
-    case "io":
-      return "whois.nic.io";
-    case "ai":
-      return "whois.nic.ai";
-    case "co":
-      return "whois.nic.co";
-    case "app":
-    case "dev":
-      return "whois.nic.google";
-    default:
-      return undefined;
-  }
-}
-
-async function queryWhois(_host: string, _query: string, _timeoutMs = 8000): Promise<string> {
-  throw new Error("whois_tcp_disabled");
-}
-
-function parseWhoisText(text: string): WhoisSummary {
-  const getLine = (re: RegExp) => {
-    const m = text.match(re);
-    return m ? m[1].trim() : undefined;
-  };
-  const registrar = getLine(/Registrar:\s*(.+)/i) || getLine(/Sponsoring Registrar:\s*(.+)/i);
-  const createdAt = getLine(/Creation Date:\s*([^\r\n]+)/i) || getLine(/Registered On:\s*([^\r\n]+)/i);
-  const expiresAt = getLine(/Registry Expiry Date:\s*([^\r\n]+)/i) || getLine(/Expiry Date:\s*([^\r\n]+)/i);
-  const registrantCountry = getLine(/Registrant Country:\s*([^\r\n]+)/i);
-  const statusMatches = text.match(/Domain Status:\s*([^\r\n]+)/gi) || text.match(/^Status:\s*([^\r\n]+)/gim) || [];
-  const status = statusMatches.map((s) => s.replace(/^(Domain Status:|Status:)\s*/i, "").split(" ")[0]);
-  return { registrar, createdAt, expiresAt, registrantCountry, status: status.length ? status : undefined };
+  return {};
 }
 
 export async function getScreenshotUrl(name: string): Promise<string> {
-  // Always proxy through internal API to avoid exposing keys
   return `/api/get-screenshot?name=${encodeURIComponent(name)}`;
 }
 

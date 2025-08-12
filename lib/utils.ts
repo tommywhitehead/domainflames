@@ -6,10 +6,8 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function getEnv(name: string): string | undefined {
-  const env: Record<string, string> | undefined =
-    typeof process !== "undefined" && (process as any)?.env
-      ? ((process as any).env as Record<string, string>)
-      : undefined;
+  const hasProcess = typeof process !== "undefined" && typeof (process as unknown) === "object";
+  const env: NodeJS.ProcessEnv | undefined = hasProcess ? (process as NodeJS.Process).env : undefined;
   const value = env?.[name];
   return value && value.length > 0 ? value : undefined;
 }
