@@ -397,7 +397,9 @@ export async function getWhois(name: string): Promise<WhoisSummary> {
 }
 
 export async function getScreenshotUrl(name: string): Promise<string> {
-  return `/api/get-screenshot?name=${encodeURIComponent(name)}`;
+  // Add cache-busting parameter to ensure fresh screenshots
+  const cacheBuster = Date.now();
+  return `/api/get-screenshot?name=${encodeURIComponent(name)}&cb=${cacheBuster}`;
 }
 
 

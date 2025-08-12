@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import chromium from "@sparticuz/chromium";
 import puppeteerCore from "puppeteer-core";
+import puppeteer from "puppeteer";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export async function GET(req: NextRequest) {
-  const name = req.nextUrl.searchParams.get("name");
-  if (!name) return NextResponse.json({ error: "Missing name" }, { status: 400 });
-  
+async function createBrowser() {
+  // Try @sparticuz/chromium first (for Vercel/production)
   try {
-    // Always use puppeteer-core with @sparticuz/chromium for Vercel
     const executablePath = await chromium.executablePath();
-    
-    const browser = await puppeteerCore.launch({
+    return await puppeteerCore.launch({
       args: [
         ...chromium.args,
         "--no-sandbox",
@@ -27,6 +26,37 @@ export async function GET(req: NextRequest) {
       executablePath,
       headless: true,
     });
+  } catch (error) {
+    console.log("Failed to use @sparticuz/chromium, falling back to puppeteer:", error);
+    
+    // Fallback to regular puppeteer (for local development)
+    try {
+      return await puppeteer.launch({
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+        ],
+        defaultViewport: { width: 1366, height: 768 },
+        headless: true,
+      });
+    } catch (fallbackError) {
+      console.error("Both puppeteer setups failed:", fallbackError);
+      throw new Error("No working puppeteer configuration found");
+    }
+  }
+}
+
+export async function GET(req: NextRequest) {
+  const name = req.nextUrl.searchParams.get("name");
+  if (!name) return NextResponse.json({ error: "Missing name" }, { status: 400 });
+  
+  // Add cache-busting parameter to force fresh screenshots
+  const _cacheBuster = req.nextUrl.searchParams.get("cb") || Date.now().toString();
+  
+  try {
+    const browser = await createBrowser();
 
     try {
       const page = await browser.newPage();
@@ -64,7 +94,9 @@ export async function GET(req: NextRequest) {
         return new NextResponse(svg, { 
           headers: { 
             "content-type": "image/svg+xml",
-            "cache-control": "public, max-age=300"
+            "cache-control": "no-cache, no-store, must-revalidate",
+            "pragma": "no-cache",
+            "expires": "0"
           } 
         });
       }
@@ -81,7 +113,9 @@ export async function GET(req: NextRequest) {
       return new NextResponse(Buffer.from(screenshot), { 
         headers: { 
           "content-type": "image/png",
-          "cache-control": "public, max-age=300"
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "pragma": "no-cache",
+          "expires": "0"
         } 
       });
       
@@ -90,19 +124,22 @@ export async function GET(req: NextRequest) {
     }
     
   } catch (error) {
-    console.error("Screenshot error:", error);
+    console.error("Screenshot error for domain:", name, error);
     
     // Return a fallback SVG on any error
     const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='1366' height='768'>
       <rect width='100%' height='100%' fill='#f8f9fa'/>
       <text x='50%' y='45%' dominant-baseline='middle' text-anchor='middle' font-family='system-ui, -apple-system, Segoe UI, Roboto' font-size='24' fill='#6c757d'>Screenshot unavailable</text>
       <text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-family='system-ui, -apple-system, Segoe UI, Roboto' font-size='16' fill='#adb5bd'>${name}</text>
+      <text x='50%' y='65%' dominant-baseline='middle' text-anchor='middle' font-family='system-ui, -apple-system, Segoe UI, Roboto' font-size='12' fill='#adb5bd'>Error: ${error instanceof Error ? error.message : 'Unknown error'}</text>
     </svg>`;
     
     return new NextResponse(svg, { 
       headers: { 
         "content-type": "image/svg+xml",
-        "cache-control": "public, max-age=300"
+        "cache-control": "no-cache, no-store, must-revalidate",
+        "pragma": "no-cache",
+        "expires": "0"
       } 
     });
   }
