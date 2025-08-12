@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   try {
     const data = await getRegistrarPrices(tld, name || undefined);
     return NextResponse.json(data);
-  } catch (e) {
+  } catch (_e) {
     return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
   }
 }

@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
         if (text && /domain name:/i.test(text)) break;
       } catch {}
     }
-    let parsed = text ? parseWhoisText(text) : {};
+    let parsed: { registrar?: string; createdAt?: string; expiresAt?: string; registrantCountry?: string; status?: string[] } = text ? parseWhoisText(text) : {};
 
     // Scrape fallback (best-effort) from GoDaddy WHOIS page if still empty
     if (!parsed.registrar && !parsed.createdAt && !parsed.expiresAt) {
@@ -146,7 +146,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "WHOIS unavailable" }, { status: 502 });
     }
     return NextResponse.json(parsed);
-  } catch (e) {
+  } catch (_e) {
     return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
   }
 }

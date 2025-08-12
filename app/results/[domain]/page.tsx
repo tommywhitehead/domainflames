@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { extractTld } from "@/lib/tld";
-import type { RegistrarPrice, WhoisSummary, Suggestion, DomainStatus } from "@/lib/types";
+import type { RegistrarPrice, Suggestion, DomainStatus } from "@/lib/types";
 import { getDomainStatus, getAlternatives, getRegistrarPrices, getScreenshotUrl } from "@/lib/fetchers";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RegistrarTable } from "@/components/registrar-table";
-import { WhoisCard } from "@/components/whois-card";
 import { WhoisPanel } from "@/components/whois-panel";
 import { ScreenshotCard } from "@/components/screenshot-card";
 import { SuggestionsGrid } from "@/components/suggestions-grid";

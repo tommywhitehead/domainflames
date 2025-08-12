@@ -25,8 +25,7 @@ export async function GET(req: NextRequest) {
         args: chromium.args,
         defaultViewport: { width: 1366, height: 768 },
         executablePath: exe,
-        headless: chromium.headless,
-        ignoreHTTPSErrors: true,
+        headless: true,
       });
     })();
     try {
@@ -56,7 +55,7 @@ export async function GET(req: NextRequest) {
       // small delay to allow above-the-fold content to settle
       await new Promise((r) => setTimeout(r, 1200));
       const buf = await page.screenshot({ type: "png" });
-      return new NextResponse(buf, { headers: { "content-type": "image/png" } });
+      return new NextResponse(Buffer.from(buf), { headers: { "content-type": "image/png" } });
     } finally {
       await browser.close();
     }
