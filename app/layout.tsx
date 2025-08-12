@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: process.env.NEXT_PUBLIC_APP_NAME || "Domain Scout",
+  title: "DomainFlames 🔥",
   description: "Search domain availability, pricing, WHOIS, and alternatives.",
 };
 
@@ -28,8 +28,8 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background text-foreground`}>
         <div className="w-full border-b">
           <div className="container mx-auto max-w-4xl px-4 py-4">
-            <Link href="/" className="font-semibold" aria-label="Home">
-              {process.env.NEXT_PUBLIC_APP_NAME || "Domain Scout"}
+            <Link href="/" className="font-semibold text-lg" aria-label="Home">
+              DomainFlames 🔥
             </Link>
           </div>
         </div>
