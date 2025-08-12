@@ -46,12 +46,7 @@ async function rdapLookup(domain: string): Promise<{ exists: boolean; statusRaw:
 async function checkDomainAvailability(domain: string): Promise<{ available: boolean; statusRaw: string }> {
   // Try multiple sources for better accuracy
   const sources = [
-    // Primary: RDAP
-    async () => {
-      const rdap = await rdapLookup(domain);
-      return { available: !rdap.exists, statusRaw: rdap.statusRaw };
-    },
-    // Fallback: DNS lookup
+    // Primary: DNS lookup (most reliable)
     async () => {
       try {
         const dns = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(domain)}&type=A`);
@@ -61,6 +56,11 @@ async function checkDomainAvailability(domain: string): Promise<{ available: boo
       } catch {
         return { available: false, statusRaw: "dns_error" };
       }
+    },
+    // Secondary: RDAP
+    async () => {
+      const rdap = await rdapLookup(domain);
+      return { available: !rdap.exists, statusRaw: rdap.statusRaw };
     },
     // Fallback: HTTP check
     async () => {
@@ -76,16 +76,32 @@ async function checkDomainAvailability(domain: string): Promise<{ available: boo
     }
   ];
 
-  // Try sources in order, return first definitive result
+  // Collect results from all sources to make informed decision
+  const results: Array<{ available: boolean; statusRaw: string }> = [];
+  
   for (const source of sources) {
     try {
       const result = await source();
       if (result.statusRaw !== "rdap_timeout" && result.statusRaw !== "dns_error") {
-        return result;
+        results.push(result);
       }
     } catch {
       continue;
     }
+  }
+
+  // If we have multiple results, prioritize DNS over RDAP
+  if (results.length > 1) {
+    const dnsResult = results.find(r => r.statusRaw === "dns_resolved" || r.statusRaw === "no_dns");
+    if (dnsResult) {
+      return dnsResult;
+    }
+  }
+
+  // Return first available result, or assume taken if none available
+  const firstResult = results[0];
+  if (firstResult) {
+    return firstResult;
   }
 
   // If all sources fail, be conservative and assume taken
